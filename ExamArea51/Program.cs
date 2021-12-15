@@ -23,6 +23,9 @@ namespace ExamArea51
 
             Task.WhenAll(tasks).Wait();
 
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine("--------------------------------");
+            Console.WriteLine("---WORK DAY AT AREA51 IS OVER---");
         }
     }
 }

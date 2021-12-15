@@ -8,10 +8,11 @@ namespace ExamArea51
 {
     public class MessageWriter
     {
-        public static void ShowMessage(string message)
+        public static void ShowMessage(string message, ConsoleColor color)
         {
             lock (Console.Out)
             {
+                Console.ForegroundColor = color;
                 Console.WriteLine(message);
             }
         }

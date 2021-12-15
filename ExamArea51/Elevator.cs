@@ -10,15 +10,9 @@ namespace ExamArea51
     public enum Floors
     {
         G = 0,
-        S = 1, 
+        S = 1,
         T1 = 2,
         T2 = 3
-    }
-
-    public enum State
-    {
-        Waiting,
-        Moving
     }
 
     public class Elevator
@@ -27,7 +21,6 @@ namespace ExamArea51
         private int elevatorSpeedPerFloor = 1000;//ms
         private Floors currentFloor;
         private Floors targetFloor;
-        private State state;
         private List<Agent> agentsInside;
         private object locker = new object();
         private static object creationLocker = new();
@@ -35,13 +28,13 @@ namespace ExamArea51
         private Elevator()
         {
             currentFloor = Floors.G;
-            state = State.Waiting;
             agentsInside = new();
 
         }
 
         private static volatile Elevator instance;
 
+        // Here I use a Singletone Pattern
         public static Elevator ElevatorInstance
         {
             get
@@ -61,88 +54,117 @@ namespace ExamArea51
         }
 
 
-        private readonly Semaphore semaphore = new(1, 1);
+        private readonly Mutex mutex = new();
 
-        public async Task Call(Agent agent, Func<Floors> targetFloor)
+        public void PressCallButton(Agent agent, Floors? targetFloor)
         {
-            semaphore.WaitOne();
+            MessageWriter.ShowMessage($"Agent {agent.AgentCode} calls the elevator.", ConsoleColor.White);
 
-            this.targetFloor = targetFloor.Invoke();
+            Call(agent, targetFloor);
+        }
 
-            await GoToFloor();
+        private void Call(Agent agent, Floors? floor)
+        {
+            mutex.WaitOne();
+
+            SetTargetFloor(agent.GetCurrentAgentFloor());
+
+            GoToFloor();
 
             if (agent.GetCurrentAgentFloor() == currentFloor)
             {
-                EnterAgentIntoElevator(agent);
+                lock (agentsInside)
+                {
+                    EnterAgentIntoElevator(agent);
+                }
             }
 
-            while (state == State.Waiting)
+            if (floor!=null)
+            {
+                lock(agentsInside)
+                {
+                    targetFloor = (Floors)floor;
+                }
+            }
+            else
             {
                 lock (agentsInside)
                 {
-                    this.targetFloor = agent.ChooseFloor();
+                    this.targetFloor = Agent.ChooseFloor();
                 }
+            }
 
-                var checker = await CheckAgentSecurityLevel(agent, this.targetFloor);
 
-                if (checker.Contains(this.targetFloor))
-                {
-                    await GoToFloor();
-                }
-                else
+            MessageWriter.ShowMessage($"Agent {agent.AgentCode} pressed the button for floor {this.targetFloor}", ConsoleColor.White);
+
+            var checker = CheckAgentSecurityLevel(agent, this.targetFloor);
+
+            if (checker.Contains(this.targetFloor))
+            {
+                GoToFloor();
+                agent.SetCurrentFloor(currentFloor);
+                lock (agentsInside)
                 {
                     LeaveAgentFrom(agent);
                 }
             }
+            else
+            {
+                MessageWriter.ShowMessage($"The Agent {agent.AgentCode} has no permission to go to the {this.targetFloor} floor.", ConsoleColor.DarkRed);
+                lock (agentsInside)
+                {
+                    LeaveAgentFrom(agent);
+                }
+            }
+
+            mutex.ReleaseMutex();
         }
 
         private void EnterAgentIntoElevator(Agent agent)
         {
             agentsInside.Add(agent);
 
-            MessageWriter.ShowMessage($"The Agent {agent.AgentCode} entered the elevator.");
+            MessageWriter.ShowMessage($"The Agent {agent.AgentCode} entered the elevator.", ConsoleColor.White);
         }
 
         private void LeaveAgentFrom(Agent agent)
         {
-            agentsInside.Remove(agent);
+            MessageWriter.ShowMessage($"The Agent {agent.AgentCode} got off the elevator.", ConsoleColor.White);
 
-            MessageWriter.ShowMessage($"The Agent {agent.AgentCode} got off the elevator.");
+            agentsInside.Remove(agent);
         }
 
-        private async Task GoToFloor()
+        private void GoToFloor()
         {
             int distance = Math.Abs(currentFloor - targetFloor);
 
             if (distance == 0)
             {
-                return;
+                Task.Delay(1000);
+                MessageWriter.ShowMessage($"Agent is currently on {currentFloor}", ConsoleColor.White);
             }
             else
             {
                 for (int i = 0; i < distance; i++)
                 {
-                    MessageWriter.ShowMessage($"Elevator with is going to {targetFloor} floor");
+                    MessageWriter.ShowMessage($"Elevator is going to {targetFloor} floor", ConsoleColor.White);
 
-                    SetElevatorState(State.Moving);
-
-                    await Task.Delay(elevatorSpeedPerFloor);                    
+                    Task.Delay(elevatorSpeedPerFloor).Wait();
                 }
+                SetCurrentFloor(targetFloor);
 
-                MessageWriter.ShowMessage($"The elevator arrived at {currentFloor}");
-
-                SetElevatorState(State.Waiting);
-
-                currentFloor = targetFloor;
+                MessageWriter.ShowMessage($"The elevator arrived at {currentFloor}", ConsoleColor.White);
             }
         }
 
-        private void SetElevatorState(State targetState)
+        public void SetTargetFloor(Floors targetFloor)
         {
-            lock (agentsInside)
-            {
-                this.state = targetState;
-            }
+            this.targetFloor = targetFloor;
+        }
+
+        public void SetCurrentFloor(Floors currentFloor)
+        {
+            this.currentFloor = currentFloor;
         }
 
 
@@ -151,7 +173,7 @@ namespace ExamArea51
             return currentFloor;
         }
 
-        public async Task<List<Floors>> CheckAgentSecurityLevel(Agent agent, Floors floor)
+        public List<Floors> CheckAgentSecurityLevel(Agent agent, Floors floor)
         {
             List<Floors> floors = new();
 
@@ -159,17 +181,17 @@ namespace ExamArea51
             {
                 case SecurityLevel.Confidential:
                     floors.Add(Floors.G);
-                    return await Task.FromResult(floors);
+                    return floors;
                 case SecurityLevel.Secret:
                     floors.Add(Floors.G);
                     floors.Add(Floors.S);
-                    return await Task.FromResult(floors);
+                    return floors;
                 case SecurityLevel.TopSecret:
                     floors.Add(Floors.G);
                     floors.Add(Floors.S);
                     floors.Add(Floors.T1);
                     floors.Add(Floors.T2);
-                    return await Task.FromResult(floors);
+                    return floors;
                 default:
                     return floors;
             }
